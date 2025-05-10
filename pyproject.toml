@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "universal-search-tool"
+version = "0.1.0"
+description = ""
+authors = ["Tal Perets <112990364+talperets@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+langchain = "^0.1.0"
+ollama = "^0.1.0"
+duckduckgo-search = "^3.9.0"
+python-dotenv = "^1.0.0"
+googlesearch-python = "^1.3.0"
+flask = "^3.1.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
