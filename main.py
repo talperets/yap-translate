@@ -2,15 +2,25 @@ from flask import Flask, render_template, request, jsonify
 import requests
 import json
 from googlesearch import search as google_search
+from newspaper import Article, Config
 from os import getenv
+from urllib.parse import urlparse
+import re
 
 app = Flask(__name__)
+
+def clean_text(text):
+    """Clean article text by removing excessive whitespace and newlines"""
+    if not text:
+        return ""
+    text = re.sub(r'\n\s*\n', '\n\n', text)  # Replace multiple newlines with double newline
+    return text.strip()
 
 def generate_queries(problem: str) -> list[str]:
     """Generate 3 search queries from a problem statement using Gemini API directly."""
     api_key = getenv("GOOGLE_API_KEY")
     if not api_key:
-        raise EnvironmentError("GOOGLE_API_KEY environment variable not set.")
+        raise OSError("GOOGLE_API_KEY environment variable not set.")
 
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
@@ -42,9 +52,7 @@ def generate_queries(problem: str) -> list[str]:
     queries = text_response.strip().split("\n")
     return [q.strip() for q in queries if q.strip()][:3]
 
-
 def enhance_query(base_query: str, includes: str, excludes: str, site: str) -> str:
-    """Enhance the query with includes, excludes, and site focus."""
     if includes:
         include_keywords = [kw.strip() for kw in includes.split(",") if kw.strip()]
         for kw in include_keywords:
@@ -66,17 +74,60 @@ def enhance_query(base_query: str, includes: str, excludes: str, site: str) -> s
 
     return base_query
 
+def scrape_article(url: str) -> dict:
+    """Scrape article content and metadata"""
+    config = Config()
+    config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36'
+    config.request_timeout = 10
+    
+    try:
+        article = Article(url, config=config)
+        article.download()
+        article.parse()
+        
+        # Get the full article text without any truncation
+        full_text = article.text
+        
+        return {
+            "title": article.title,
+            "content": clean_text(full_text),
+            "date": article.publish_date.isoformat() if article.publish_date else None,
+            "success": True
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
-def search_queries(queries: list[str], max_results: int = 5, includes: str = "", excludes: str = "", site: str = "") -> list[dict]:
-    """Search each query using Google and return structured results."""
+def search_queries(queries: list[str], max_results: int = 10, includes: str = "", excludes: str = "", site: str = "") -> list[dict]:
     results = []
     for query in queries:
         enhanced_query = enhance_query(query, includes, excludes, site)
         try:
             search_results = list(google_search(enhanced_query, num_results=max_results))
+            structured = []
+            for url in search_results:
+                # Skip non-HTTP URLs and certain domains that don't work well with newspaper3k
+                parsed = urlparse(url)
+                if not parsed.scheme.startswith('http'):
+                    continue
+                
+                # Scrape article content
+                article_data = scrape_article(url)
+                
+                result = {
+                    "url": url,
+                    "date": article_data.get("date"),
+                    "title": article_data.get("title") or parsed.netloc.replace("www.", ""),
+                    "content": article_data.get("content") if article_data.get("success") else None
+                }
+                
+                structured.append(result)
+                
             results.append({
                 "query": enhanced_query,
-                "results": [{"url": url} for url in search_results]
+                "results": structured
             })
         except Exception as e:
             results.append({
@@ -85,11 +136,9 @@ def search_queries(queries: list[str], max_results: int = 5, includes: str = "",
             })
     return results
 
-
 @app.route("/", methods=["GET"])
 def index():
     return render_template("index.html")
-
 
 @app.route("/search", methods=["POST"])
 def handle_search():
@@ -111,7 +160,6 @@ def handle_search():
             "success": False,
             "error": str(e)
         })
-
 
 if __name__ == "__main__":
     port = int(getenv("PORT") or "5000")
