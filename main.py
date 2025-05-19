@@ -161,6 +161,7 @@ def handle_search():
             "error": str(e)
         })
 
+
 if __name__ == "__main__":
     port = int(getenv("PORT") or "5000")
     app.run(host="0.0.0.0", port=port)
